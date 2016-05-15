@@ -13,6 +13,7 @@ import sys
 import tempfile
 import webbrowser
 import sys
+import time
 
 import appdirs
 
@@ -78,6 +79,7 @@ def main(config):
 
     # Take screenshot
     try:
+        time.sleep(0.2)
         subprocess.check_call(['scrot', '-s', filename], stdout=subprocess.DEVNULL)
     except subprocess.CalledProcessError as e:
         print('Could not take screenshot: %s' % e)
