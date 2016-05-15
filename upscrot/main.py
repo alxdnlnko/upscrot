@@ -115,10 +115,11 @@ def main(config):
         if config.get('upload', 'open_in_browser', fallback=False):
             webbrowser.open(url, autoraise=False)
 
-    try:
-        print(url, flush=True)
-    except (BrokenPipeError, IOError):
-        pass
+        try:
+            print(url, flush=True)
+        except (BrokenPipeError, IOError):
+            pass
+
     sys.stderr.close()
 
 
