@@ -11,6 +11,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import webbrowser
+import sys
 
 import appdirs
 
@@ -40,12 +42,16 @@ def init_config():
 
     # Create it otherwise.
     else:
+        config['local'] = {
+            '# save_to': '/home/user/pictures/',
+            'file_prefix': 'screenshot-',
+            'file_permissions': '0644'
+        }
         config['upload'] = {
             'target_host': 'example.org',
             'target_dir': '/var/www/tmp/screenshots',
             'base_url': 'https://example.org/tmp/screenshots/',
-            'file_prefix': 'screenshot-',
-            'file_permissions': '0644',
+            '# open_in_browser': 1
         }
         with open(confpath, 'w+') as f:
             config.write(f)
@@ -55,46 +61,65 @@ def init_config():
 
 
 def main(config):
-    timestamp = datetime.datetime.today().strftime('%Y%m%d%H%M%S')
-    prefix = config['upload'].get('file_prefix', 'screenshot-')
+    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+    prefix = config.get('local', 'file_prefix', fallback='screenshot-')
+
+    save_to = config.get('local', 'save_to', fallback=None)
     screenshot = tempfile.NamedTemporaryFile(
+            dir=save_to,
             prefix='%s%s-' % (prefix, timestamp),
             suffix='.png'
     )
+    filename = screenshot.name
+
+    if save_to:
+        # close tempfile to allow scrot to recreate it
+        screenshot.close()
 
     # Take screenshot
     try:
-        subprocess.check_call(['scrot', '-s', screenshot.name])
+        subprocess.check_call(['scrot', '-s', filename], stdout=subprocess.DEVNULL)
     except subprocess.CalledProcessError as e:
         print('Could not take screenshot: %s' % e)
         exit(-1)
 
     # Set permissions
-    mode = config['upload'].get('file_permissions', '0644')
-    os.chmod(screenshot.name, int(mode, base=8))
+    mode = config.get('local', 'file_permissions', fallback='0644')
+    os.chmod(filename, int(mode, base=8))
 
     # Upload file
-    try:
-        subprocess.check_call([
-            'scp',
-            screenshot.name,
-            '%s:%s' % (config['upload']['target_host'], config['upload']['target_dir']),
-        ])
-    except subprocess.CalledProcessError as e:
-        print('Could not copy file to server: %s' % e)
-        exit(-1)
-    url = config['upload']['base_url'] + os.path.basename(screenshot.name)
+    # ensure config includes all needed options
+    options = set(['target_host', 'target_dir', 'base_url'])
+    if config.has_section('upload') and len((options & config['upload'].keys())) >= len(options):
+        try:
+            subprocess.check_call([
+                'scp',
+                filename,
+                '%s:%s' % (config.get('upload', 'target_host'), config.get('upload', 'target_dir')),
+            ], stdout=subprocess.DEVNULL)
+        except subprocess.CalledProcessError as e:
+            print('Could not copy file to server: %s' % e)
+            exit(-1)
+        url = config.get('upload', 'base_url') + os.path.basename(filename)
 
-    # X clipboard
+        # X clipboard
+        try:
+            clipboards = ['-pi', '-bi']
+            for clipboard in clipboards:
+                xsel = subprocess.Popen(['xsel', clipboard], stdin=subprocess.PIPE)
+                xsel.communicate(input=url.encode('utf8'))
+        except OSError:
+            pass
+
+        # Open in browser
+        if config.get('upload', 'open_in_browser', fallback=False):
+            webbrowser.open(url, autoraise=False)
+
     try:
-        clipboards = ['-pi', '-bi']
-        for clipboard in clipboards:
-            xsel = subprocess.Popen(['xsel', clipboard], stdin=subprocess.PIPE)
-            xsel.communicate(input=url.encode('utf8'))
-    except OSError:
+        print(url, flush=True)
+    except (BrokenPipeError, IOError):
         pass
-
-    print(url)
+    sys.stderr.close()
 
 
 def entrypoint():
